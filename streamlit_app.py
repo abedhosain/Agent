@@ -12,11 +12,22 @@ from io import BytesIO
 from datetime import datetime
 import time
 
-# AI Model Imports
-from google import genai
-from google.genai import types
-import transformers
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+# Conditional imports for AI models
+try:
+    from google import genai
+    from google.genai import types
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    st.warning("Google Generative AI package not available. Some features will be disabled.")
+
+try:
+    import transformers
+    from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    st.warning("Transformers package not available. Gemma model features will be disabled.")
 
 # Set page config
 st.set_page_config(
@@ -71,6 +82,9 @@ def load_api_keys():
 @st.cache_resource
 def load_gemma_model():
     """Load Gemma 3 1B-it model from HuggingFace"""
+    if not TRANSFORMERS_AVAILABLE:
+        return None
+        
     try:
         tokenizer = AutoTokenizer.from_pretrained("google/gemma-3-1b-it", token=HF_TOKEN)
         model = AutoModelForCausalLM.from_pretrained("google/gemma-3-1b-it", token=HF_TOKEN)
@@ -92,13 +106,21 @@ def save_uploaded_file(uploaded_file):
 
 # Initialize Gemini client
 def init_gemini_client(api_key):
-    if api_key:
+    if not GEMINI_AVAILABLE or not api_key:
+        return None
+        
+    try:
         genai.configure(api_key=api_key)
         return genai.Client(api_key=api_key)
-    return None
+    except Exception as e:
+        st.error(f"Error initializing Gemini client: {e}")
+        return None
 
 # Function to generate text with Gemma model
 def generate_with_gemma(prompt, max_tokens=1024):
+    if not TRANSFORMERS_AVAILABLE or gemma_pipe is None:
+        return "Gemma model not available. Please check your HuggingFace token and internet connection."
+    
     messages = [{"role": "user", "content": prompt}]
     try:
         response = gemma_pipe(messages, max_new_tokens=max_tokens, temperature=0.7)
@@ -109,6 +131,9 @@ def generate_with_gemma(prompt, max_tokens=1024):
 
 # Function to generate text with Gemini model
 def generate_with_gemini(prompt, model="gemini-2.0-flash", temperature=0.7, max_tokens=4096):
+    if not GEMINI_AVAILABLE or gemini_client is None:
+        return "Gemini model not available. Please check your API key and internet connection."
+    
     try:
         # Create the prompt structure
         contents = [
@@ -141,6 +166,9 @@ def generate_with_gemini(prompt, model="gemini-2.0-flash", temperature=0.7, max_
 
 # Function to generate image with Gemini
 def generate_image_with_gemini(prompt):
+    if not GEMINI_AVAILABLE or gemini_client is None:
+        return None, None
+        
     try:
         # Create the prompt structure
         contents = [
@@ -177,29 +205,21 @@ def generate_image_with_gemini(prompt):
         st.error(f"Error generating image with Gemini: {e}")
         return None, None
 
-# Save generated image
-def save_image(image_data, mime_type):
-    file_name = f"generated_image_{int(time.time())}"
-    file_extension = mimetypes.guess_extension(mime_type)
-    full_path = f"{file_name}{file_extension}"
-    
-    with open(full_path, "wb") as f:
-        f.write(image_data)
-    
-    return full_path
-
 # Function to display generated image
 def display_generated_image(image_data, mime_type):
     if image_data and mime_type:
-        image = Image.open(BytesIO(image_data))
-        st.image(image, caption="Generated Image", use_column_width=True)
-        
-        # Create download button
-        buffered = BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        href = f'<a href="data:image/png;base64,{img_str}" download="generated_image.png">Download Image</a>'
-        st.markdown(href, unsafe_allow_html=True)
+        try:
+            image = Image.open(BytesIO(image_data))
+            st.image(image, caption="Generated Image", use_column_width=True)
+            
+            # Create download button
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            href = f'<a href="data:image/png;base64,{img_str}" download="generated_image.png">Download Image</a>'
+            st.markdown(href, unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Error displaying image: {e}")
 
 # Market & Product Analysis function
 def market_analysis(product_description, target_audience, industry):
@@ -344,20 +364,6 @@ def performance_analysis(campaign_data, campaign_objectives):
     """
     return generate_with_gemini(prompt)
 
-# Image Generation function
-def generate_brand_imagery(product_description, brand_style, image_type):
-    prompt = f"""
-    Create a professional marketing image for:
-    
-    Product: {product_description}
-    Brand Style: {brand_style}
-    Image Type: {image_type}
-    
-    The image should be high quality, visually appealing, and aligned with the brand style. 
-    Create an image that would work well for digital marketing campaigns.
-    """
-    return generate_image_with_gemini(prompt)
-
 # Video Script Generation
 def generate_video_script(product_description, brand_name, video_type, duration):
     prompt = f"""
@@ -436,7 +442,7 @@ GEMINI_API_KEY, HF_TOKEN = load_api_keys()
 
 # Initialize clients
 gemini_client = init_gemini_client(GEMINI_API_KEY)
-gemma_pipe = load_gemma_model()
+gemma_pipe = load_gemma_model() if TRANSFORMERS_AVAILABLE else None
 
 # Main app layout
 st.markdown('<h1 class="main-header">🚀 AI Marketing Agent</h1>', unsafe_allow_html=True)
@@ -538,6 +544,457 @@ if st.session_state.current_tab == "Market Analysis":
                     mime="text/markdown"
                 )
                 
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Market Analysis Benefits")
+        st.markdown("""
+        - Identify market opportunities
+        - Understand competitor landscape
+        - Find optimal positioning strategy
+        - Determine best marketing channels
+        - Create targeted campaigns
+        - Maximize ROI on marketing spend
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Examples")
+        st.markdown("""
+        **Example Product:** 
+        Eco-friendly water bottle with smart temperature tracking
+        
+        **Example Analysis:**
+        - Target: Health-conscious millennials (25-40)
+        - Trends: Sustainability, wellness tracking, hydration habits
+        - Platforms: Instagram, TikTok, Pinterest
+        - Positioning: Premium eco-tech that encourages healthy habits
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+elif st.session_state.current_tab == "Brand Builder":
+    st.markdown('<h2 class="sub-header">🌟 Brand Builder</h2>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Brand Identity Creator")
+        
+        brand_values = st.text_area("Brand Values/Personality", placeholder="Describe the personality and values of your brand...")
+        
+        if st.button("Generate Brand Identity"):
+            if product_description and target_audience and brand_values:
+                with st.spinner("Creating brand identity..."):
+                    brand_result = brand_building(product_description, target_audience, brand_values)
+                    st.session_state.generated_data["brand_identity"] = brand_result
+                    
+                    # Add to history
+                    st.session_state.history.append({
+                        "tool": "Brand Builder",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "inputs": {
+                            "product": product_description,
+                            "audience": target_audience,
+                            "values": brand_values
+                        }
+                    })
+                    
+                st.success("Brand identity created!")
+            else:
+                st.warning("Please fill all required fields.")
+        
+        if st.session_state.generated_data["brand_identity"]:
+            st.markdown("### Brand Identity Results")
+            st.markdown(st.session_state.generated_data["brand_identity"])
+            
+            # Export options
+            if st.button("Export Brand Identity"):
+                report = f"""
+                # Brand Identity Report
+                
+                ## Product Information
+                {product_description}
+                
+                ## Target Audience
+                {target_audience}
+                
+                ## Brand Values/Personality
+                {brand_values}
+                
+                ## Brand Identity Results
+                {st.session_state.generated_data["brand_identity"]}
+                
+                ## Generated on
+                {datetime.now().strftime("%Y-%m-%d %H:%M")}
+                """
+                
+                st.download_button(
+                    label="Download Brand Identity",
+                    data=report,
+                    file_name="brand_identity_report.md",
+                    mime="text/markdown"
+                )
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Brand Image Generator")
+        
+        brand_style = st.selectbox(
+            "Brand Style",
+            ["Minimalist", "Bold & Vibrant", "Luxury", "Playful", "Eco/Natural", "Tech/Futuristic", "Vintage/Retro"]
+        )
+        
+        image_type = st.selectbox(
+            "Image Type",
+            ["Logo Concept", "Social Media Banner", "Product Packaging", "Brand Moodboard"]
+        )
+        
+        if st.button("Generate Brand Image"):
+            if product_description and brand_style and image_type and GEMINI_AVAILABLE and gemini_client:
+                with st.spinner("Generating brand image..."):
+                    prompt = f"""
+                    Create a professional {image_type.lower()} for:
+                    
+                    Product: {product_description}
+                    Brand Style: {brand_style}
+                    
+                    The image should be high quality, visually appealing, and aligned with the brand style.
+                    Create an image that would work well for digital marketing campaigns.
+                    """
+                    
+                    image_data, mime_type = generate_image_with_gemini(prompt)
+                    if image_data:
+                        # Convert from base64 if needed
+                        if isinstance(image_data, str):
+                            image_data = base64.b64decode(image_data)
+                        
+                        # Display the image
+                        display_generated_image(image_data, mime_type)
+                        
+                        # Save to session state
+                        st.session_state.generated_data["generated_images"].append({
+                            "type": image_type,
+                            "data": image_data,
+                            "mime_type": mime_type,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                    else:
+                        st.error("Failed to generate image. Please try again.")
+            else:
+                if not GEMINI_AVAILABLE or not gemini_client:
+                    st.warning("Image generation requires the Google Generative AI package and a valid API key.")
+                else:
+                    st.warning("Please fill all required fields.")
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+
+elif st.session_state.current_tab == "Content Creator":
+    st.markdown('<h2 class="sub-header">🎨 Content Creator</h2>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Content Generation")
+        
+        brand_name = st.text_input("Brand Name", placeholder="Enter your brand name...")
+        platform = st.selectbox(
+            "Platform",
+            ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube", "Pinterest"]
+        )
+        
+        if st.button("Generate Content Ideas"):
+            if product_description and target_audience and brand_name and platform:
+                with st.spinner("Creating content ideas..."):
+                    content_result = content_generation(product_description, target_audience, brand_name, platform)
+                    st.session_state.generated_data["content_ideas"] = content_result
+                    
+                    # Add to history
+                    st.session_state.history.append({
+                        "tool": "Content Creator",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "inputs": {
+                            "product": product_description,
+                            "audience": target_audience,
+                            "brand": brand_name,
+                            "platform": platform
+                        }
+                    })
+                    
+                st.success("Content ideas generated!")
+            else:
+                st.warning("Please fill all required fields.")
+        
+        if st.session_state.generated_data["content_ideas"]:
+            st.markdown("### Content Ideas")
+            st.markdown(st.session_state.generated_data["content_ideas"])
+            
+            # Export options
+            if st.button("Export Content Plan"):
+                report = f"""
+                # Content Plan
+                
+                ## Product Information
+                {product_description}
+                
+                ## Target Audience
+                {target_audience}
+                
+                ## Brand Name
+                {brand_name}
+                
+                ## Platform
+                {platform}
+                
+                ## Content Ideas
+                {st.session_state.generated_data["content_ideas"]}
+                
+                ## Generated on
+                {datetime.now().strftime("%Y-%m-%d %H:%M")}
+                """
+                
+                st.download_button(
+                    label="Download Content Plan",
+                    data=report,
+                    file_name="content_plan.md",
+                    mime="text/markdown"
+                )
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Video Script Generator")
+        
+        video_type = st.selectbox(
+            "Video Type",
+            ["Product Demo", "Brand Story", "Tutorial", "Customer Testimonial", "Behind the Scenes"]
+        )
+        
+        duration = st.selectbox(
+            "Video Duration",
+            ["15 seconds", "30 seconds", "60 seconds", "2-3 minutes"]
+        )
+        
+        if st.button("Generate Video Script"):
+            if product_description and brand_name and video_type and duration:
+                with st.spinner("Creating video script..."):
+                    script_result = generate_video_script(product_description, brand_name, video_type, duration)
+                    
+                    # Display script
+                    st.markdown("### Video Script")
+                    st.markdown(script_result)
+                    
+                    # Download option
+                    st.download_button(
+                        label="Download Script",
+                        data=script_result,
+                        file_name=f"{video_type.lower().replace(' ', '_')}_script.md",
+                        mime="text/markdown"
+                    )
+            else:
+                st.warning("Please fill all required fields.")
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Social Media Response Generator")
+        
+        comments = st.text_area(
+            "Customer Comments",
+            placeholder="Paste comments/questions from customers that need responses..."
+        )
+        
+        if st.button("Generate Responses"):
+            if comments and product_description:
+                with st.spinner("Creating response templates..."):
+                    brand_voice = "Professional and friendly" if not brand_name else f"{brand_name}'s voice"
+                    responses = generate_social_responses(comments, brand_voice, product_description)
+                    
+                    # Display responses
+                    st.markdown("### Response Templates")
+                    st.markdown(responses)
+                    
+                    # Download option
+                    st.download_button(
+                        label="Download Responses",
+                        data=responses,
+                        file_name="social_media_responses.md",
+                        mime="text/markdown"
+                    )
+            else:
+                st.warning("Please provide customer comments and product information.")
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+
+elif st.session_state.current_tab == "Campaign Planner":
+    st.markdown('<h2 class="sub-header">📊 Campaign Planner</h2>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Marketing Campaign Planner")
+        
+        brand_name = st.text_input("Brand Name", placeholder="Enter your brand name...")
+        objectives = st.text_area(
+            "Campaign Objectives",
+            placeholder="What are your marketing objectives? E.g., increase brand awareness, drive sales, launch new product..."
+        )
+        
+        if st.button("Generate Campaign Plan"):
+            if product_description and target_audience and brand_name and objectives:
+                with st.spinner("Creating campaign plan..."):
+                    campaign_result = campaign_planning(product_description, target_audience, brand_name, objectives)
+                    st.session_state.generated_data["campaign_plan"] = campaign_result
+                    
+                    # Add to history
+                    st.session_state.history.append({
+                        "tool": "Campaign Planner",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "inputs": {
+                            "product": product_description,
+                            "audience": target_audience,
+                            "brand": brand_name,
+                            "objectives": objectives
+                        }
+                    })
+                    
+                st.success("Campaign plan created!")
+            else:
+                st.warning("Please fill all required fields.")
+        
+        if st.session_state.generated_data["campaign_plan"]:
+            st.markdown("### Campaign Plan")
+            st.markdown(st.session_state.generated_data["campaign_plan"])
+            
+            # Export options
+            if st.button("Export Campaign Plan"):
+                report = f"""
+                # Marketing Campaign Plan
+                
+                ## Product Information
+                {product_description}
+                
+                ## Target Audience
+                {target_audience}
+                
+                ## Brand Name
+                {brand_name}
+                
+                ## Campaign Objectives
+                {objectives}
+                
+                ## Campaign Plan
+                {st.session_state.generated_data["campaign_plan"]}
+                
+                ## Generated on
+                {datetime.now().strftime("%Y-%m-%d %H:%M")}
+                """
+                
+                st.download_button(
+                    label="Download Campaign Plan",
+                    data=report,
+                    file_name="marketing_campaign_plan.md",
+                    mime="text/markdown"
+                )
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Campaign Timeline")
+        
+        start_date = st.date_input("Campaign Start Date")
+        end_date = st.date_input("Campaign End Date")
+        
+        if start_date and end_date and (end_date > start_date):
+            # Create sample timeline chart
+            timeline_data = pd.DataFrame({
+                'Task': ['Research', 'Planning', 'Content Creation', 'Launch', 'Evaluation'],
+                'Start': pd.to_datetime([start_date, start_date + pd.Timedelta(days=7), 
+                                        start_date + pd.Timedelta(days=14), 
+                                        start_date + pd.Timedelta(days=21),
+                                        end_date - pd.Timedelta(days=7)]),
+                'End': pd.to_datetime([start_date + pd.Timedelta(days=7), 
+                                      start_date + pd.Timedelta(days=14), 
+                                      start_date + pd.Timedelta(days=21),
+                                      end_date - pd.Timedelta(days=7),
+                                      end_date])
+            })
+            
+            fig = px.timeline(timeline_data, x_start="Start", x_end="End", y="Task", color="Task")
+            fig.update_layout(xaxis_title="Date", yaxis_title="Phase")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Please select valid start and end dates.")
+            
+        st.markdown("### Budget Allocation Tool")
+        
+        # Sample budget allocation
+        total_budget = st.number_input("Total Campaign Budget ($)", min_value=0, value=1000)
+        
+        if total_budget > 0:
+            # Preset allocations based on common marketing practice
+            allocations = {
+                "Social Media Ads": 0.40,
+                "Content Creation": 0.25,
+                "Influencer Marketing": 0.15,
+                "Email Campaigns": 0.10,
+                "Analytics & Tools": 0.05,
+                "Contingency": 0.05
+            }
+            
+            # Create budget allocation chart
+            fig = go.Figure(data=[go.Pie(
+                labels=list(allocations.keys()),
+                values=[total_budget * v for v in allocations.values()],
+                textinfo='label+percent+value',
+                hole=.3
+            )])
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Allow manual adjustments
+            st.markdown("### Adjust Budget Allocation")
+            for channel, default_pct in allocations.items():
+                allocations[channel] = st.slider(
+                    f"{channel} (%)", 
+                    min_value=0.0, 
+                    max_value=1.0, 
+                    value=default_pct,
+                    step=0.05,
+                    format="%.2f"
+                )
+            
+            # Normalize if total exceeds 100%
+            total_pct = sum(allocations.values())
+            if total_pct > 0:
+                normalized = {k: v/total_pct for k, v in allocations.items()}
+                
+                # Updated chart
+                fig2 = go.Figure(data=[go.Pie(
+                    labels=list(normalized.keys()),
+                    values=[total_budget * v for v in normalized.values()],
+                    textinfo='label+percent+value',
+                    hole=.3
+                )])
+                
+                st.plotly_chart(fig2, use_container_width=True)
+                
+                # Show actual dollar amounts
+                budget_df = pd.DataFrame({
+                    'Channel': normalized.keys(),
+                    'Percentage': [f"{v*100:.1f}%" for v in normalized.values()],
+                    'Amount ($)': [f"${total_budget * v:.2f}" for v in normalized.values()]
+                })
+                
+                st.dataframe(budget_df)
+        
         st.markdown('</div>', unsafe_allow_html=True)
 
 elif st.session_state.current_tab == "Performance Analyzer":
@@ -770,7 +1227,7 @@ elif st.session_state.current_tab == "Image Generator":
         )
         
         if st.button("Generate Image"):
-            if product_description and image_type and brand_style:
+            if product_description and image_type and brand_style and GEMINI_AVAILABLE and gemini_client:
                 with st.spinner("Generating marketing image..."):
                     prompt = f"""
                     Create a professional {image_type.lower()} for:
@@ -825,7 +1282,10 @@ elif st.session_state.current_tab == "Image Generator":
                     else:
                         st.error("Failed to generate image. Please try again.")
             else:
-                st.warning("Please fill all required fields.")
+                if not GEMINI_AVAILABLE or not gemini_client:
+                    st.warning("Image generation requires the Google Generative AI package and a valid API key.")
+                else:
+                    st.warning("Please fill all required fields.")
                 
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -891,441 +1351,3 @@ with col2:
         """, 
         unsafe_allow_html=True
     )
-    
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Campaign Timeline")
-        
-        start_date = st.date_input("Campaign Start Date")
-        end_date = st.date_input("Campaign End Date")
-        
-        if start_date and end_date and (end_date > start_date):
-            # Create sample timeline chart
-            timeline_data = pd.DataFrame({
-                'Task': ['Research', 'Planning', 'Content Creation', 'Launch', 'Evaluation'],
-                'Start': pd.to_datetime([start_date, start_date + pd.Timedelta(days=7), 
-                                        start_date + pd.Timedelta(days=14), 
-                                        start_date + pd.Timedelta(days=21),
-                                        end_date - pd.Timedelta(days=7)]),
-                'End': pd.to_datetime([start_date + pd.Timedelta(days=7), 
-                                      start_date + pd.Timedelta(days=14), 
-                                      start_date + pd.Timedelta(days=21),
-                                      end_date - pd.Timedelta(days=7),
-                                      end_date])
-            })
-            
-            fig = px.timeline(timeline_data, x_start="Start", x_end="End", y="Task", color="Task")
-            fig.update_layout(xaxis_title="Date", yaxis_title="Phase")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Please select valid start and end dates.")
-            
-        st.markdown("### Budget Allocation Tool")
-        
-        # Sample budget allocation
-        total_budget = st.number_input("Total Campaign Budget ($)", min_value=0, value=1000)
-        
-        if total_budget > 0:
-            # Preset allocations based on common marketing practice
-            allocations = {
-                "Social Media Ads": 0.40,
-                "Content Creation": 0.25,
-                "Influencer Marketing": 0.15,
-                "Email Campaigns": 0.10,
-                "Analytics & Tools": 0.05,
-                "Contingency": 0.05
-            }
-            
-            # Create budget allocation chart
-            fig = go.Figure(data=[go.Pie(
-                labels=list(allocations.keys()),
-                values=[total_budget * v for v in allocations.values()],
-                textinfo='label+percent+value',
-                hole=.3
-            )])
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Allow manual adjustments
-            st.markdown("### Adjust Budget Allocation")
-            for channel, default_pct in allocations.items():
-                allocations[channel] = st.slider(
-                    f"{channel} (%)", 
-                    min_value=0.0, 
-                    max_value=1.0, 
-                    value=default_pct,
-                    step=0.05,
-                    format="%.2f"
-                )
-            
-            # Normalize if total exceeds 100%
-            total_pct = sum(allocations.values())
-            if total_pct > 0:
-                normalized = {k: v/total_pct for k, v in allocations.items()}
-                
-                # Updated chart
-                fig2 = go.Figure(data=[go.Pie(
-                    labels=list(normalized.keys()),
-                    values=[total_budget * v for v in normalized.values()],
-                    textinfo='label+percent+value',
-                    hole=.3
-                )])
-                
-                st.plotly_chart(fig2, use_container_width=True)
-                
-                # Show actual dollar amounts
-                budget_df = pd.DataFrame({
-                    'Channel': normalized.keys(),
-                    'Percentage': [f"{v*100:.1f}%" for v in normalized.values()],
-                    'Amount ($)': [f"${total_budget * v:.2f}" for v in normalized.values()]
-                })
-                
-                st.dataframe(budget_df)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("### Market Analysis Benefits")
-        st.markdown("""
-        - Identify market opportunities
-        - Understand competitor landscape
-        - Find optimal positioning strategy
-        - Determine best marketing channels
-        - Create targeted campaigns
-        - Maximize ROI on marketing spend
-        """)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Examples")
-        st.markdown("""
-        **Example Product:** 
-        Eco-friendly water bottle with smart temperature tracking
-        
-        **Example Analysis:**
-        - Target: Health-conscious millennials (25-40)
-        - Trends: Sustainability, wellness tracking, hydration habits
-        - Platforms: Instagram, TikTok, Pinterest
-        - Positioning: Premium eco-tech that encourages healthy habits
-        """)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-elif st.session_state.current_tab == "Brand Builder":
-    st.markdown('<h2 class="sub-header">🌟 Brand Builder</h2>', unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Brand Identity Creator")
-        
-        brand_values = st.text_area("Brand Values/Personality", placeholder="Describe the personality and values of your brand...")
-        
-        if st.button("Generate Brand Identity"):
-            if product_description and target_audience and brand_values:
-                with st.spinner("Creating brand identity..."):
-                    brand_result = brand_building(product_description, target_audience, brand_values)
-                    st.session_state.generated_data["brand_identity"] = brand_result
-                    
-                    # Add to history
-                    st.session_state.history.append({
-                        "tool": "Brand Builder",
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "inputs": {
-                            "product": product_description,
-                            "audience": target_audience,
-                            "values": brand_values
-                        }
-                    })
-                    
-                st.success("Brand identity created!")
-            else:
-                st.warning("Please fill all required fields.")
-        
-        if st.session_state.generated_data["brand_identity"]:
-            st.markdown("### Brand Identity Results")
-            st.markdown(st.session_state.generated_data["brand_identity"])
-            
-            # Export options
-            if st.button("Export Brand Identity"):
-                report = f"""
-                # Brand Identity Report
-                
-                ## Product Information
-                {product_description}
-                
-                ## Target Audience
-                {target_audience}
-                
-                ## Brand Values/Personality
-                {brand_values}
-                
-                ## Brand Identity Results
-                {st.session_state.generated_data["brand_identity"]}
-                
-                ## Generated on
-                {datetime.now().strftime("%Y-%m-%d %H:%M")}
-                """
-                
-                st.download_button(
-                    label="Download Brand Identity",
-                    data=report,
-                    file_name="brand_identity_report.md",
-                    mime="text/markdown"
-                )
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Brand Image Generator")
-        
-        brand_style = st.selectbox(
-            "Brand Style",
-            ["Minimalist", "Bold & Vibrant", "Luxury", "Playful", "Eco/Natural", "Tech/Futuristic", "Vintage/Retro"]
-        )
-        
-        image_type = st.selectbox(
-            "Image Type",
-            ["Logo Concept", "Social Media Banner", "Product Packaging", "Brand Moodboard"]
-        )
-        
-        if st.button("Generate Brand Image"):
-            if product_description and brand_style and image_type:
-                with st.spinner("Generating brand image..."):
-                    image_data, mime_type = generate_brand_imagery(product_description, brand_style, image_type)
-                    if image_data:
-                        # Convert from base64 if needed
-                        if isinstance(image_data, str):
-                            image_data = base64.b64decode(image_data)
-                        
-                        # Display the image
-                        display_generated_image(image_data, mime_type)
-                        
-                        # Save to session state
-                        st.session_state.generated_data["generated_images"].append({
-                            "type": image_type,
-                            "data": image_data,
-                            "mime_type": mime_type,
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
-                        })
-                    else:
-                        st.error("Failed to generate image. Please try again.")
-            else:
-                st.warning("Please fill all required fields.")
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-
-elif st.session_state.current_tab == "Content Creator":
-    st.markdown('<h2 class="sub-header">🎨 Content Creator</h2>', unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Content Generation")
-        
-        brand_name = st.text_input("Brand Name", placeholder="Enter your brand name...")
-        platform = st.selectbox(
-            "Platform",
-            ["Instagram", "TikTok", "Facebook", "LinkedIn", "Twitter/X", "YouTube", "Pinterest"]
-        )
-        
-        if st.button("Generate Content Ideas"):
-            if product_description and target_audience and brand_name and platform:
-                with st.spinner("Creating content ideas..."):
-                    content_result = content_generation(product_description, target_audience, brand_name, platform)
-                    st.session_state.generated_data["content_ideas"] = content_result
-                    
-                    # Add to history
-                    st.session_state.history.append({
-                        "tool": "Content Creator",
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "inputs": {
-                            "product": product_description,
-                            "audience": target_audience,
-                            "brand": brand_name,
-                            "platform": platform
-                        }
-                    })
-                    
-                st.success("Content ideas generated!")
-            else:
-                st.warning("Please fill all required fields.")
-        
-        if st.session_state.generated_data["content_ideas"]:
-            st.markdown("### Content Ideas")
-            st.markdown(st.session_state.generated_data["content_ideas"])
-            
-            # Export options
-            if st.button("Export Content Plan"):
-                report = f"""
-                # Content Plan
-                
-                ## Product Information
-                {product_description}
-                
-                ## Target Audience
-                {target_audience}
-                
-                ## Brand Name
-                {brand_name}
-                
-                ## Platform
-                {platform}
-                
-                ## Content Ideas
-                {st.session_state.generated_data["content_ideas"]}
-                
-                ## Generated on
-                {datetime.now().strftime("%Y-%m-%d %H:%M")}
-                """
-                
-                st.download_button(
-                    label="Download Content Plan",
-                    data=report,
-                    file_name="content_plan.md",
-                    mime="text/markdown"
-                )
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Video Script Generator")
-        
-        video_type = st.selectbox(
-            "Video Type",
-            ["Product Demo", "Brand Story", "Tutorial", "Customer Testimonial", "Behind the Scenes"]
-        )
-        
-        duration = st.selectbox(
-            "Video Duration",
-            ["15 seconds", "30 seconds", "60 seconds", "2-3 minutes"]
-        )
-        
-        if st.button("Generate Video Script"):
-            if product_description and brand_name and video_type and duration:
-                with st.spinner("Creating video script..."):
-                    script_result = generate_video_script(product_description, brand_name, video_type, duration)
-                    
-                    # Display script
-                    st.markdown("### Video Script")
-                    st.markdown(script_result)
-                    
-                    # Download option
-                    st.download_button(
-                        label="Download Script",
-                        data=script_result,
-                        file_name=f"{video_type.lower().replace(' ', '_')}_script.md",
-                        mime="text/markdown"
-                    )
-            else:
-                st.warning("Please fill all required fields.")
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Social Media Response Generator")
-        
-        comments = st.text_area(
-            "Customer Comments",
-            placeholder="Paste comments/questions from customers that need responses..."
-        )
-        
-        if st.button("Generate Responses"):
-            if comments and product_description:
-                with st.spinner("Creating response templates..."):
-                    brand_voice = "Professional and friendly" if not brand_name else f"{brand_name}'s voice"
-                    responses = generate_social_responses(comments, brand_voice, product_description)
-                    
-                    # Display responses
-                    st.markdown("### Response Templates")
-                    st.markdown(responses)
-                    
-                    # Download option
-                    st.download_button(
-                        label="Download Responses",
-                        data=responses,
-                        file_name="social_media_responses.md",
-                        mime="text/markdown"
-                    )
-            else:
-                st.warning("Please provide customer comments and product information.")
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-
-elif st.session_state.current_tab == "Campaign Planner":
-    st.markdown('<h2 class="sub-header">📊 Campaign Planner</h2>', unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Marketing Campaign Planner")
-        
-        brand_name = st.text_input("Brand Name", placeholder="Enter your brand name...")
-        objectives = st.text_area(
-            "Campaign Objectives",
-            placeholder="What are your marketing objectives? E.g., increase brand awareness, drive sales, launch new product..."
-        )
-        
-        if st.button("Generate Campaign Plan"):
-            if product_description and target_audience and brand_name and objectives:
-                with st.spinner("Creating campaign plan..."):
-                    campaign_result = campaign_planning(product_description, target_audience, brand_name, objectives)
-                    st.session_state.generated_data["campaign_plan"] = campaign_result
-                    
-                    # Add to history
-                    st.session_state.history.append({
-                        "tool": "Campaign Planner",
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "inputs": {
-                            "product": product_description,
-                            "audience": target_audience,
-                            "brand": brand_name,
-                            "objectives": objectives
-                        }
-                    })
-                    
-                st.success("Campaign plan created!")
-            else:
-                st.warning("Please fill all required fields.")
-        
-        if st.session_state.generated_data["campaign_plan"]:
-            st.markdown("### Campaign Plan")
-            st.markdown(st.session_state.generated_data["campaign_plan"])
-            
-            # Export options
-            if st.button("Export Campaign Plan"):
-                report = f"""
-                # Marketing Campaign Plan
-                
-                ## Product Information
-                {product_description}
-                
-                ## Target Audience
-                {target_audience}
-                
-                ## Brand Name
-                {brand_name}
-                
-                ## Campaign Objectives
-                {objectives}
-                
-                ## Campaign Plan
-                {st.session_state.generated_data["campaign_plan"]}
-                
-                ## Generated on
-                {datetime.now().strftime("%Y-%m-%d %H:%M")}
-                """
-                
-                st.download_button(
-                    label="Download Campaign Plan",
-                    data=report,
-                    file_name="marketing_campaign_plan.md",
-                    mime="text/markdown"
-                )
-                
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
